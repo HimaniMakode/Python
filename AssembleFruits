@@ -224,11 +224,6 @@ def main():
     root_directory_path = get_input_directory()
     merge_file_path = get_merge_file_path()
     sub_directory_count = get_sub_directory_count()
-
-    # Examples: after running the progam values should be specified as shown.
-    #root_directory_path = "C:\\Users\\ktrivedi\\Downloads\\Coding Problem\\Coding Problem"
-    #merge_file_path = "C:\\Users\\ktrivedi\\Downloads\\Coding Problem\\Coding Problem\\merged.log"
-    #sub_directory_count = 5
     
     logs_merger = log_merger(root_directory_path, merge_file_path, sub_directory_count)
     logs_merger.merge();
