@@ -1,0 +1,244 @@
+#################################################################################################
+# Brute-force: read all the logs entries into memory and sort them and write them to merged file
+# This is a very expensive operation. Keeping all the data into memory is not feasible operation
+# The files are around 500KB, reading all the 5 logs into memory can cause it hold around 2.5 MB
+# into memory, for bigger files operation is not scalable. The sorting is also very expensive ope
+# ration. Sorting takes O(logN) time. That should be avoided.
+#
+# Implemented solution: Read one row at a time into memory, compare all the entries date time value
+# and write the oldest entry to the merged logs. This operation does not require the sorting and
+# that is why it runs in O(N). Only one row is being read at a time, that is why it does not keep
+# too much data into memory. Risky operation: It keeps the file handles open in memory to save the
+# time opening and closing the handles.
+#
+#################################################################################################
+
+import os
+import datetime
+
+# class to get the statics of the kiwi occurrances from each log entry
+class kiwi_statistics:
+    def __init__(self):
+        # intialize the values for later processing
+        self.min = 100000000000;
+        self.max = -100000000000;
+        self.sum = 0;
+        self.count = 0;
+
+    # update the kiwi stats as the logs are being read 
+    def update(self, count):
+        self.count = self.count + 1
+        self.min = min(self.min, count)
+        self.max = max(self.max, count)
+        self.sum = self.sum + count
+
+    def get_min(self):
+        return self.min
+
+    def get_max(self):
+        return self.max
+
+    def get_average(self):
+        return (self.sum / self.count)
+
+# helper class to merge the all the logs in to single log file
+class log_merger:
+    def __init__(self, root_directory, merge_file_path, sub_directory_count):
+        # root directory that contains the logs directory
+        self.root_directory = root_directory
+        # final result path for the merged log
+        self.merge_file_path = merge_file_path
+        # total number of directories under the root directory
+        self.sub_directory_count = sub_directory_count
+        # initialize the parser
+        self.parser = row_parser()
+
+    # opens all the file handles parallely
+    def open_file_handles(self, file_handles):
+        for index in range(self.sub_directory_count):
+            file_path = (self.root_directory + "\Dir" + str(index) + "\\" + "fruit.log")
+            file_handle = open(file_path, 'r')
+            file_handles.append(file_handle)
+
+   # close all the file handles after procssing
+    def close_file_handles(self, file_handles):
+        for handle in file_handles:
+            handle.close()
+
+    # read the first entry from each logs file and save into the array
+    # uncomment the print statement to check the how does it look like
+    def read_first_entry(self, file_handles, current_pointers):
+        for handle in file_handles:
+            current_pointers.append(handle.readline())
+        #print (current_pointers)
+
+    # after finding the oldest logs entry write the entry to merged file
+    def write_to_merged_file(self, entry):
+        with open(self.merge_file_path, "a+") as myfile:
+            myfile.write(entry)
+
+    # move the current pointer from log file to move to next row
+    def move_current_pointer (self, file_handles, current_pointers, index):
+        # reads a row from specified file handle
+        st = file_handles[index].readline()
+        # if the log file hit the end of the file, remove the entry
+        # from current_pointers (expensive operation but becuase there
+        # are only 5 log files, it is not very expesive)
+        if not st:
+            del file_handles[index]
+            del current_pointers[index]
+        else:
+            current_pointers[index] = st
+
+    # current_pointers holds single entry from each log file
+    # here we will compare all the entries date time value
+    # file the oldest value and return that entry so
+    # write_to_merged_file can write that entry to the merged file
+    # Also, we will update the kiwi statistics here in order to
+    # do the kiwi processing in single pass.
+    def process_current_pointers(self, current_pointers):
+        min_dt = datetime.datetime.max
+        min_position = 0
+        curr_position = 0
+        for row in current_pointers:
+            dt = self.parser.parse_row(row)
+            # find the oldest entry from all 5 entries
+            if dt < min_dt:
+                min_dt = dt
+                min_position = curr_position
+            curr_position = curr_position + 1
+        return min_position
+
+    # merges the all logs files in to one log file
+    def merge(self):
+        # array to keep the handles opened in memory
+        # (risky operation: forgetting to close opened handles
+        # can cause memory leaks but in order to achieve O(N)
+        # this is required)
+        file_handles = []
+
+        # holds the single entry from each log file
+        current_pointers = []
+
+        # open all the file handles for late procesing
+        self.open_file_handles(file_handles)
+
+        # read the first entry to start the processing
+        self.read_first_entry(file_handles, current_pointers)
+
+        # As soon as we hit the end of file, we delete the current_pointer
+        # from the array, that means when all files are end of file
+        # there will be no entry left in this array
+        while current_pointers:
+            # file the oldest entry
+            min_pointer = self.process_current_pointers(current_pointers)
+            # write the oldest entry 
+            self.write_to_merged_file(current_pointers[min_pointer])
+            # move the pointer to next row
+            self.move_current_pointer(file_handles, current_pointers, min_pointer)
+
+        # done processing close all the handles
+        self.close_file_handles(file_handles)
+
+    def get_parser(self):
+        return self.parser
+            
+
+# helper class to process the rows
+class row_parser:
+    def __init__(self):
+        self.kiwi_stats = kiwi_statistics()
+
+    # parses each row and updates the kiwi stats
+    def parse_row(self, row):
+        splits = row.split()
+        if splits[5] and splits[5].lower() == "kiwi":
+            c = int(splits[7])
+            self.kiwi_stats.update(c)
+        month = self.get_month(splits[0])
+        date = int(splits[1])
+        time_splits = splits[2].split(':')
+        # (risky operations: checks should be made here for
+        # null or empty strings before parsing but we are
+        # assuming all the entries in all the log files are
+        # well-formatted.)
+        hour = int(time_splits[0])
+        minute = int(time_splits[1])
+        second = int(time_splits[2])
+        # Year values does not matter so keeping min year is a safe option
+        dt = datetime.datetime(datetime.MINYEAR, month, date, hour, minute, second)
+        return dt
+
+    # maps a string value to integer value
+    # expensive function: we should use the dictionary to
+    # directly map the string to int value
+    def get_month(self, month_str):
+        if "jan" == month_str.lower() : return 1
+        elif "feb" == month_str.lower() : return 2
+        elif "mar" == month_str.lower() : return 3
+        elif "apr" == month_str.lower() : return 4
+        elif "may" == month_str.lower() : return 5
+        elif "jun" == month_str.lower() : return 6
+        elif "jul" == month_str.lower() : return 7
+        elif "aug" == month_str.lower() : return 8
+        elif "sep" == month_str.lower() : return 9
+        elif "oct" == month_str.lower() : return 10
+        elif "nov" == month_str.lower() : return 11
+        else  : return 12
+
+    def get_kiwi_stats(self):
+        return self.kiwi_stats
+
+def get_input_directory():
+    result = None
+    file_path = input("Enter the directory where the fruit logs directories: ")
+    if not file_path:
+        print ("The file path is not specified.")
+    elif not (os.path.exists(file_path) and os.path.isdir(file_path)):
+        print ("The path does not exist or it is not a directory")
+    else:
+        result = file_path
+    return result
+        
+def get_merge_file_path():
+    result = None
+    merge_file_path = input("Enter the file path for merged file: ")
+    if not merge_file_path:
+        print ("The merge file path is not specified.")
+    else:
+        result = merge_file_path
+    return result
+
+def get_sub_directory_count():
+    result = 0
+    count = input("Enter sub directory count: ")
+    if not count:
+        print ("The sub-directory count is not specified")
+    else:
+        result = int(count)
+    return result
+
+def main():
+    print ("Hello, World")
+    
+    root_directory_path = get_input_directory()
+    merge_file_path = get_merge_file_path()
+    sub_directory_count = get_sub_directory_count()
+
+    # Examples: after running the progam values should be specified as shown.
+    #root_directory_path = "C:\\Users\\ktrivedi\\Downloads\\Coding Problem\\Coding Problem"
+    #merge_file_path = "C:\\Users\\ktrivedi\\Downloads\\Coding Problem\\Coding Problem\\merged.log"
+    #sub_directory_count = 5
+    
+    logs_merger = log_merger(root_directory_path, merge_file_path, sub_directory_count)
+    logs_merger.merge();
+    print ("The logs are merged in sorted way to the file location %s" % (merge_file_path))
+
+    kiwi_stats = logs_merger.get_parser().get_kiwi_stats()
+    print ("Kiwi Stats: Min = %d, Max = %d, Average = %f" % (kiwi_stats.get_min(), kiwi_stats.get_max(), kiwi_stats.get_average()))
+    
+        
+if __name__ == "__main__":
+    main()
+
+
